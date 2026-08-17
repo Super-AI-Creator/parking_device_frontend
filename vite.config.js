@@ -7,7 +7,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'https://dolphin-app-pb66i.ondigitalocean.app',
+        target: 'https://dolphin-app-pb66i.ondigitalocean.app/',
         changeOrigin: true,
       },
     },
