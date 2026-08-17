@@ -6,6 +6,19 @@ import { useToasts } from '../Toasts.jsx'
 
 const emptyForm = { hotelId: '', name: '', lockId: '', pin: '', notes: '', enabled: true }
 
+function normalizeLockId(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  // TTLock may send numbers; DB stores strings — compare on digits only.
+  const digits = raw.replace(/\D/g, '')
+  return digits || raw
+}
+
+function mergeHotelSpaces(current, hotelId, hotelSpaces) {
+  const others = (current || []).filter((space) => String(space.hotelId) !== String(hotelId))
+  return [...others, ...(hotelSpaces || [])]
+}
+
 const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'pms', label: 'Beds24 PMS' },
@@ -131,16 +144,38 @@ export default function ManagerDashboard() {
       setGatewayError('Save TTLock username and password for this hotel to load gateways.')
       return
     }
+    let cancelled = false
     api.listHotelGateways(selectedHotelId, true)
       .then((res) => {
+        if (cancelled) return
         setGateways(res.gateways || [])
-        setGatewayError('')
+        // Prefer DB spaces from the response — lockSync.spaces can be a stale empty-PIN snapshot.
+        const linked = res.spaces || res.lockSync?.spaces || []
+        setSpaces((prev) => mergeHotelSpaces(prev, selectedHotelId, linked))
+        if (res.lockSync?.errors?.length) {
+          setGatewayError(res.lockSync.errors.map((item) => `lock ${item.lockId}: ${item.error}`).join(' · '))
+        } else {
+          setGatewayError('')
+        }
+        if (res.lockSync?.added > 0) {
+          pushToast({
+            type: 'success',
+            title: 'Parking locks imported',
+            body: `${res.lockSync.added} TTLock device(s) are now available for bookings.`,
+          })
+        }
       })
       .catch((err) => {
+        if (cancelled) return
         setGateways([])
         setGatewayError(err.message)
       })
-  }, [selectedHotelId, hotels])
+    return () => {
+      cancelled = true
+    }
+  // Only re-import when the selected hotel or its TTLock connection changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedHotelId, selectedHotel?.ttlockConfigured, selectedHotel?.ttlockUsername, pushToast])
 
   if (authLoading) return <div className="page-loading">Loading…</div>
   if (!authenticated) return <Navigate to="/login" replace />
@@ -216,11 +251,11 @@ export default function ManagerDashboard() {
     setError('')
     setFlash(null)
     try {
-      await api.saveHotelTtlock(selectedHotelId, hotelTtlock)
-      setFlash(`TTLock connected for ${selectedHotel?.name || 'hotel'}. Gateways will load from this account.`)
+      const res = await api.saveHotelTtlock(selectedHotelId, hotelTtlock)
+      setFlash(res.message || `TTLock connected for ${selectedHotel?.name || 'hotel'}. Parking locks are imported automatically.`)
       setHotelTtlock((prev) => ({ ...prev, password: '' }))
       await refresh()
-      setTab('gateways')
+      setTab('spaces')
     } catch (err) {
       setError(err.message)
     } finally {
@@ -245,6 +280,10 @@ export default function ManagerDashboard() {
 
   async function saveSpace(event) {
     event.preventDefault()
+    if (!editingId) {
+      setError('Select an available parking space first.')
+      return
+    }
     setSaving(true)
     setError('')
     setFlash(null)
@@ -257,17 +296,12 @@ export default function ManagerDashboard() {
         notes: form.notes.trim(),
         enabled: form.enabled,
       }
-      if (editingId) {
-        await api.updateSpace(editingId, payload)
-        setFlash(payload.pin ? 'Parking space updated with manual PIN' : 'Parking space updated')
-      } else {
-        await api.createSpace(payload)
-        setFlash(
-          payload.pin
-            ? 'Parking space added with a manual PIN. Bookings will not use this lock until the PIN is cleared.'
-            : 'Parking space added. Bookings can assign a PIN to this lock, or you can set one manually.',
-        )
-      }
+      await api.updateSpace(editingId, payload)
+      setFlash(
+        payload.pin
+          ? `Manual PIN ${payload.pin} saved on ${form.name || 'this parking lock'}.`
+          : `${form.name || 'Parking lock'} is free again for booking auto-assign.`,
+      )
       setEditingId(null)
       setForm({ ...emptyForm, hotelId: form.hotelId })
       await refresh()
@@ -275,6 +309,67 @@ export default function ManagerDashboard() {
       setError(err.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function removeSpace(space) {
+    if (!window.confirm(`Free ${space.name}? The PIN will be removed from the TTLock and this lock becomes Available.`)) {
+      return
+    }
+    setBusyId(`delete-${space.id}`)
+    setError('')
+    setFlash(null)
+    try {
+      const res = await api.deleteSpace(space.id)
+      setFlash(res.message || `${space.name} is Available again.`)
+      pushToast({
+        type: 'info',
+        title: 'Parking lock freed',
+        body: res.message || `${space.name} is Available again.`,
+      })
+      await refresh()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function refreshGateways() {
+    setError('')
+    if (!selectedHotelId) {
+      await refresh()
+      return
+    }
+    try {
+      const gatewayRes = await api.listHotelGateways(selectedHotelId, true)
+      setGateways(gatewayRes.gateways || [])
+      const linked = gatewayRes.spaces || gatewayRes.lockSync?.spaces || []
+      setSpaces((prev) => mergeHotelSpaces(prev, selectedHotelId, linked))
+      setGatewayError(
+        gatewayRes.lockSync?.errors?.length
+          ? gatewayRes.lockSync.errors.map((item) => `lock ${item.lockId}: ${item.error}`).join(' · ')
+          : '',
+      )
+      // refresh() is source of truth for pins; only add locks refresh raced before insert.
+      await refresh()
+      if (linked.length) {
+        setSpaces((prev) => {
+          const hotelId = selectedHotelId
+          const others = prev.filter((s) => String(s.hotelId) !== String(hotelId))
+          const forHotel = prev.filter((s) => String(s.hotelId) === String(hotelId))
+          const merged = [...forHotel]
+          for (const space of linked) {
+            const key = normalizeLockId(space.lockId)
+            if (key && !merged.some((s) => normalizeLockId(s.lockId) === key)) {
+              merged.push(space)
+            }
+          }
+          return [...others, ...merged]
+        })
+      }
+    } catch (err) {
+      setGatewayError(err.message)
     }
   }
 
@@ -294,6 +389,22 @@ export default function ManagerDashboard() {
   }
 
   const stats = dashboard?.stats
+  const spaceByLockId = new Map(
+    spaces.map((space) => [normalizeLockId(space.lockId), space]).filter(([id]) => id),
+  )
+  const selectableSpaces = spaces.filter((space) => {
+    const hotelPk = String(form.hotelId || '')
+    const spaceHotel = String(space.hotelId ?? '')
+    const spacePublic = String(space.hotelPublicId ?? '')
+    const selectedHotel = hotels.find((item) => String(item.id) === hotelPk)
+    if (hotelPk) {
+      const matchesPk = spaceHotel === hotelPk
+      const matchesPublic = selectedHotel && spacePublic && spacePublic === String(selectedHotel.hotelId)
+      if (!matchesPk && !matchesPublic) return false
+    }
+    if (editingId && String(space.id) === String(editingId)) return true
+    return !String(space.pin || '').trim()
+  })
 
   return (
     <section className="admin-layout">
@@ -510,12 +621,15 @@ export default function ManagerDashboard() {
       {tab === 'spaces' && (
         <div className="admin-grid">
           <form className="panel form-panel" onSubmit={saveSpace}>
-            <h2>{editingId ? 'Edit space' : 'Add parking space'}</h2>
+            <h2>Set manual PIN</h2>
             <label>
               Hotel
               <select
                 value={form.hotelId}
-                onChange={(e) => setForm({ ...form, hotelId: e.target.value })}
+                onChange={(e) => {
+                  setEditingId(null)
+                  setForm({ ...emptyForm, hotelId: e.target.value })
+                }}
                 required
               >
                 <option value="">Select hotel</option>
@@ -527,21 +641,49 @@ export default function ManagerDashboard() {
               </select>
             </label>
             <label>
-              Space name
-              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+              Available parking space
+              <select
+                value={editingId ? String(editingId) : ''}
+                onChange={(e) => {
+                  const space = spaces.find((item) => String(item.id) === e.target.value)
+                  if (!space) {
+                    setEditingId(null)
+                    setForm((prev) => ({ ...emptyForm, hotelId: prev.hotelId }))
+                    return
+                  }
+                  setEditingId(space.id)
+                  setForm({
+                    hotelId: space.hotelId ? String(space.hotelId) : form.hotelId,
+                    name: space.name,
+                    lockId: space.lockId,
+                    pin: space.pin || '',
+                    notes: space.notes || '',
+                    enabled: space.enabled,
+                  })
+                }}
+                required
+                disabled={!form.hotelId}
+              >
+                <option value="">{form.hotelId ? 'Select a free parking lock' : 'Select a hotel first'}</option>
+                {selectableSpaces.map((space) => (
+                  <option key={space.id} value={space.id}>
+                    {space.name} · lockId {space.lockId}{space.pin ? ' · editing' : ' · free'}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               TTLock lockId
-              <input value={form.lockId} onChange={(e) => setForm({ ...form, lockId: e.target.value })} required />
+              <input value={form.lockId} readOnly placeholder="Filled when you select a space" />
             </label>
             <label>
-              Manual PIN (optional)
+              Manual PIN
               <input
                 value={form.pin}
                 onChange={(e) => setForm({ ...form, pin: e.target.value.replace(/\D/g, '').slice(0, 6) })}
                 inputMode="numeric"
                 maxLength={6}
-                placeholder="Leave empty for booking auto-assign"
+                placeholder="6 digits, or clear to free the lock"
               />
             </label>
             <label>
@@ -553,14 +695,14 @@ export default function ManagerDashboard() {
               Enabled
             </label>
             <p className="muted">
-              Leave PIN empty so Beds24 bookings can use this lock. A 6-digit manual PIN occupies the lock until you clear it.
+              Choose a free parking lock, then enter a 6-digit PIN. Clear the PIN to make that lock available for bookings again.
             </p>
             <div className="form-actions">
-              <button type="submit" className="btn btn-primary" disabled={saving}>
-                {saving ? 'Saving…' : editingId ? 'Update' : 'Add space'}
+              <button type="submit" className="btn btn-primary" disabled={saving || !editingId}>
+                {saving ? 'Saving…' : 'Save PIN'}
               </button>
               {editingId && (
-                <button type="button" className="btn btn-ghost" onClick={() => { setEditingId(null); setForm(emptyForm) }}>
+                <button type="button" className="btn btn-ghost" onClick={() => { setEditingId(null); setForm({ ...emptyForm, hotelId: form.hotelId }) }}>
                   Cancel
                 </button>
               )}
@@ -576,7 +718,9 @@ export default function ManagerDashboard() {
               </label>
             </div>
             {spaces.length === 0 ? (
-              <p className="empty">No spaces yet. Assign lockIds from Gateways after connecting hotel TTLock.</p>
+              <p className="empty">
+                No parking locks yet. Connect the hotel TTLock account under <strong>Hotels</strong> — every lock on that account is imported automatically. Available = no PIN, Occupied = has a PIN.
+              </p>
             ) : (
               <div className="table-wrap">
                 <table>
@@ -597,12 +741,12 @@ export default function ManagerDashboard() {
                         <td>{space.hotelName || '—'}<div className="muted"><code>{space.hotelPublicId}</code></div></td>
                         <td><code>{space.lockId}</code></td>
                         <td><code>{space.pin ? (showPins ? space.pin : '••••••') : 'Available'}</code></td>
-                        <td><span className={`chip ${space.enabled ? 'on' : 'off'}`}>{space.bookingId ? `Booking ${space.bookingId}` : (space.enabled ? 'Free' : 'Disabled')}</span></td>
+                        <td><span className={`chip ${space.pin ? 'off' : (space.enabled ? 'on' : 'off')}`}>{!space.enabled ? 'Disabled' : (space.pin ? (space.bookingId ? `Occupied · Booking ${space.bookingId}` : 'Occupied') : 'Available')}</span></td>
                         <td className="actions">
                           <button type="button" className="btn btn-small" disabled={busyId} onClick={() => runCommand(space, 'unlock')}>Open</button>
                           <button type="button" className="btn btn-small" disabled={busyId} onClick={() => runCommand(space, 'lock')}>Lock</button>
-                          <button type="button" className="btn btn-small" onClick={() => { setEditingId(space.id); setForm({ hotelId: space.hotelId ? String(space.hotelId) : '', name: space.name, lockId: space.lockId, pin: space.pin || '', notes: space.notes || '', enabled: space.enabled }) }}>Edit</button>
-                          <button type="button" className="btn btn-small danger" onClick={async () => { if (window.confirm(`Delete ${space.name}?`)) { await api.deleteSpace(space.id); await refresh() } }}>Delete</button>
+                          <button type="button" className="btn btn-small" onClick={() => { setEditingId(space.id); setForm({ hotelId: space.hotelId ? String(space.hotelId) : '', name: space.name, lockId: space.lockId, pin: space.pin || '', notes: space.notes || '', enabled: space.enabled }); setTab('spaces') }}>Set PIN</button>
+                          <button type="button" className="btn btn-small danger" disabled={busyId} onClick={() => removeSpace(space)}>Free</button>
                         </td>
                       </tr>
                     ))}
@@ -619,7 +763,10 @@ export default function ManagerDashboard() {
           <div className="panel-head">
             <div>
               <h2>Hotel TTLock gateways</h2>
-              <p className="lede tight">Gateways come from the TTLock account saved on the selected hotel.</p>
+              <p className="lede tight">
+                Locks on this hotel’s TTLock account are parking spaces automatically.
+                Status is only <strong>Available</strong> or <strong>Occupied</strong>.
+              </p>
             </div>
             <div className="form-actions">
               <select value={selectedHotelId} onChange={(e) => setSelectedHotelId(e.target.value)}>
@@ -630,7 +777,7 @@ export default function ManagerDashboard() {
                   </option>
                 ))}
               </select>
-              <button type="button" className="btn btn-ghost" onClick={() => refresh()}>Refresh</button>
+              <button type="button" className="btn btn-ghost" onClick={() => refreshGateways()}>Refresh</button>
             </div>
           </div>
           {gatewayError ? <div className="banner error">{gatewayError}</div> : null}
@@ -651,34 +798,29 @@ export default function ManagerDashboard() {
                     <div className="table-wrap">
                       <table>
                         <thead>
-                          <tr><th>Lock</th><th>lockId</th><th>RSSI</th><th></th></tr>
+                          <tr><th>Lock</th><th>lockId</th><th>RSSI</th><th>Parking</th></tr>
                         </thead>
                         <tbody>
-                          {gateway.locks.map((lock) => (
+                          {gateway.locks.map((lock) => {
+                            const lockKey = normalizeLockId(lock.lockId)
+                            const space = spaceByLockId.get(lockKey)
+                            // Only two states. Missing row is treated as Available (import pending/race).
+                            const occupied = Boolean(String(space?.pin || '').trim())
+                            const inPool = Boolean(space)
+                            return (
                             <tr key={lock.lockId}>
                               <td><strong>{lock.lockAlias || lock.lockName}</strong></td>
                               <td><code>{lock.lockId}</code></td>
                               <td>{lock.rssi ?? '—'}</td>
                               <td>
-                                <button
-                                  type="button"
-                                  className="btn btn-small"
-                                  onClick={() => {
-                                    setForm((prev) => ({
-                                      ...prev,
-                                      hotelId: selectedHotelId || prev.hotelId,
-                                      name: prev.name || lock.lockAlias || lock.lockName || `Lock ${lock.lockId}`,
-                                      lockId: String(lock.lockId),
-                                    }))
-                                    setTab('spaces')
-                                    setFlash(`lockId ${lock.lockId} ready — save it as a parking space for this hotel`)
-                                  }}
-                                >
-                                  Assign space
-                                </button>
+                                <span className={`chip ${occupied ? 'off' : 'on'}`}>
+                                  {occupied ? 'Occupied' : 'Available'}
+                                </span>
+                                {!inPool ? <div className="muted">Importing…</div> : null}
                               </td>
                             </tr>
-                          ))}
+                            )
+                          })}
                         </tbody>
                       </table>
                     </div>
