@@ -47,18 +47,30 @@ export const api = {
   deleteUser: (id) => request(`/api/admin/users/${id}`, { method: 'DELETE' }),
   getTtlock: () => request('/api/me/ttlock'),
   saveTtlock: (body) => request('/api/me/ttlock', { method: 'PUT', body: JSON.stringify(body) }),
+  getPms: () => request('/api/me/pms'),
+  savePms: (body) => request('/api/me/pms', { method: 'PUT', body: JSON.stringify(body) }),
+  syncHotels: () => request('/api/me/pms/sync-hotels', { method: 'POST', body: '{}' }),
+  syncBookings: () => request('/api/me/pms/sync-bookings', { method: 'POST', body: '{}' }),
+  listHotels: () => request('/api/hotels'),
+  saveHotelTtlock: (hotelId, body) =>
+    request(`/api/hotels/${hotelId}/ttlock`, { method: 'PUT', body: JSON.stringify(body) }),
+  listHotelGateways: (hotelId, includeLocks = true) =>
+    request(`/api/hotels/${hotelId}/gateways?includeLocks=${includeLocks ? '1' : '0'}`),
+  listBookings: (hotelId) =>
+    request(`/api/bookings${hotelId ? `?hotelId=${hotelId}` : ''}`),
   listGateways: (includeLocks = true) =>
     request(`/api/gateways?includeLocks=${includeLocks ? '1' : '0'}`),
-  listSpaces: () => request('/api/parking-spaces'),
+  listSpaces: (hotelId) =>
+    request(`/api/parking-spaces${hotelId ? `?hotelId=${hotelId}` : ''}`),
   createSpace: (body) =>
     request('/api/parking-spaces', { method: 'POST', body: JSON.stringify(body) }),
   updateSpace: (id, body) =>
     request(`/api/parking-spaces/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteSpace: (id) => request(`/api/parking-spaces/${id}`, { method: 'DELETE' }),
-  unlockByPin: (pin) =>
-    request('/api/unlock', { method: 'POST', body: JSON.stringify({ pin }) }),
-  lockByPin: (pin) =>
-    request('/api/lock', { method: 'POST', body: JSON.stringify({ pin }) }),
+  unlockByPin: (hotelId, pin) =>
+    request('/api/unlock', { method: 'POST', body: JSON.stringify({ hotelId, pin }) }),
+  lockByPin: (hotelId, pin) =>
+    request('/api/lock', { method: 'POST', body: JSON.stringify({ hotelId, pin }) }),
   spaceCommand: (id, action) =>
     request(`/api/parking-spaces/${id}/${action}`, { method: 'POST', body: '{}' }),
   listLogs: (limit = 100) => request(`/api/logs?limit=${limit}`),

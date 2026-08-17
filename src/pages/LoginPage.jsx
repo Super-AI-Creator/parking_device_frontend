@@ -65,7 +65,7 @@ export default function LoginPage() {
 
         <div className="access-links">
           <Link to="/register">Register as parking manager</Link>
-          <Link to="/">Customer PIN access</Link>
+          <Link to="/">Customer keypad</Link>
         </div>
       </form>
     </section>

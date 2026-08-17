@@ -153,9 +153,9 @@ export default function AdminDashboard() {
             <em>failed {stats?.unlockFailed ?? 0}</em>
           </article>
           <article className="stat-card">
-            <span>Gateways (my TTLock)</span>
-            <strong>{dashboard?.gateways?.online ?? '—'} / {dashboard?.gateways?.count ?? '—'}</strong>
-            <em>online / total</em>
+            <span>Hotels / bookings</span>
+            <strong>{stats?.hotels ?? '—'} / {stats?.activeBookings ?? '—'}</strong>
+            <em>properties / active PINs</em>
           </article>
         </div>
       )}
@@ -175,7 +175,7 @@ export default function AdminDashboard() {
                   <tr>
                     <th>User</th>
                     <th>Company</th>
-                    <th>TTLock</th>
+                    <th>PMS</th>
                     <th>Status</th>
                     <th>Actions</th>
                   </tr>
@@ -189,8 +189,8 @@ export default function AdminDashboard() {
                       </td>
                       <td>{user.companyName || '—'}</td>
                       <td>
-                        <span className={`chip ${user.ttlockConfigured ? 'on' : 'off'}`}>
-                          {user.ttlockConfigured ? user.ttlockUsername : 'Not connected'}
+                        <span className={`chip ${user.pmsConfigured ? 'on' : 'off'}`}>
+                          {user.pmsConfigured ? (user.pmsTokenPreview || 'Connected') : 'Not connected'}
                         </span>
                       </td>
                       <td><span className={`chip ${user.status === 'approved' ? 'on' : 'off'}`}>{user.status}</span></td>
@@ -222,15 +222,16 @@ export default function AdminDashboard() {
             <div className="table-wrap">
               <table>
                 <thead>
-                  <tr><th>Space</th><th>Owner</th><th>lockId</th><th>PIN</th><th>Status</th><th>Actions</th></tr>
+                  <tr><th>Space</th><th>Hotel</th><th>Owner</th><th>lockId</th><th>PIN</th><th>Status</th><th>Actions</th></tr>
                 </thead>
                 <tbody>
                   {spaces.map((space) => (
                     <tr key={space.id}>
                       <td><strong>{space.name}</strong></td>
+                      <td>{space.hotelName || '—'}<div className="muted"><code>{space.hotelPublicId || '—'}</code></div></td>
                       <td className="muted">#{space.ownerId}</td>
                       <td><code>{space.lockId}</code></td>
-                      <td><code>{space.pin}</code></td>
+                      <td><code>{space.pin || 'Available'}</code></td>
                       <td><span className={`chip ${space.enabled ? 'on' : 'off'}`}>{space.enabled ? 'Enabled' : 'Disabled'}</span></td>
                       <td className="actions">
                         <button type="button" className="btn btn-small" onClick={() => api.spaceCommand(space.id, 'unlock').then(() => setFlash(`Opened ${space.name}`)).catch((e) => setError(e.message))}>Open</button>
