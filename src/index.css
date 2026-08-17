@@ -552,6 +552,59 @@ th {
   font-size: 0.8rem;
 }
 
+.toast-stack {
+  position: fixed;
+  right: 1.1rem;
+  bottom: 1.1rem;
+  z-index: 80;
+  display: grid;
+  gap: 0.65rem;
+  width: min(24rem, calc(100vw - 2rem));
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+  padding: 0.9rem 1rem;
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--line);
+  background: #fff;
+  animation: toast-in 0.22s ease-out;
+}
+
+.toast div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.toast strong { font-size: 0.95rem; }
+.toast span { color: var(--muted); font-size: 0.88rem; }
+
+.toast-success { border-left: 4px solid var(--ok); }
+.toast-info { border-left: 4px solid var(--accent); }
+.toast-error, .toast-warning { border-left: 4px solid var(--amber); }
+.toast-error { border-left-color: var(--danger); }
+
+.toast-close {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 @media (max-width: 960px) {
   .overview-grid,
   .admin-grid {

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { api } from '../api'
 import { useAuth } from '../AuthContext'
+import { useToasts } from '../Toasts.jsx'
 
-const emptyForm = { hotelId: '', name: '', lockId: '', notes: '', enabled: true }
+const emptyForm = { hotelId: '', name: '', lockId: '', pin: '', notes: '', enabled: true }
 
 const TABS = [
   { id: 'overview', label: 'Overview' },
@@ -17,6 +18,8 @@ const TABS = [
 
 export default function ManagerDashboard() {
   const { authenticated, loading: authLoading, logout, appName, user, isAdmin, refresh: refreshAuth } = useAuth()
+  const { pushToast } = useToasts()
+  const lastPinLogIdRef = useRef(null)
   const [tab, setTab] = useState('overview')
   const [spaces, setSpaces] = useState([])
   const [logs, setLogs] = useState([])
@@ -41,6 +44,45 @@ export default function ManagerDashboard() {
 
   const selectedHotel = hotels.find((hotel) => String(hotel.id) === String(selectedHotelId)) || null
 
+  const notifyPinChanges = useCallback((logList) => {
+    const pinLogs = (logList || []).filter(
+      (log) => log.action === 'booking_assign' || log.action === 'booking_release',
+    )
+    const newest = pinLogs.reduce((max, log) => Math.max(max, Number(log.id) || 0), 0)
+    if (lastPinLogIdRef.current == null) {
+      lastPinLogIdRef.current = newest
+      return
+    }
+    const fresh = pinLogs
+      .filter((log) => Number(log.id) > lastPinLogIdRef.current)
+      .sort((a, b) => Number(a.id) - Number(b.id))
+    if (newest > lastPinLogIdRef.current) lastPinLogIdRef.current = newest
+
+    for (const log of fresh) {
+      const space = log.parkingSpaceName || 'a parking lock'
+      const pin = log.pin ? `PIN ${log.pin}` : 'PIN'
+      if (log.action === 'booking_assign' && log.success) {
+        pushToast({
+          type: 'success',
+          title: 'New booking PIN',
+          body: `${pin} was created on ${space}.`,
+        })
+      } else if (log.action === 'booking_assign') {
+        pushToast({
+          type: 'warning',
+          title: 'Booking needs a lock',
+          body: log.message || 'No available parking lock for this booking.',
+        })
+      } else if (log.action === 'booking_release') {
+        pushToast({
+          type: 'info',
+          title: 'PIN removed',
+          body: `${pin} was removed from ${space}. That lock is available again.`,
+        })
+      }
+    }
+  }, [pushToast])
+
   const refresh = useCallback(async () => {
     const [spacesRes, logsRes, dashRes, pmsRes, hotelsRes, bookingsRes] = await Promise.all([
       api.listSpaces(),
@@ -52,6 +94,7 @@ export default function ManagerDashboard() {
     ])
     setSpaces(spacesRes.spaces || [])
     setLogs(logsRes.logs || [])
+    notifyPinChanges(logsRes.logs || [])
     setDashboard(dashRes)
     setPmsInfo(pmsRes)
     setHotels(hotelsRes.hotels || [])
@@ -60,11 +103,19 @@ export default function ManagerDashboard() {
       if (prev && (hotelsRes.hotels || []).some((hotel) => String(hotel.id) === String(prev))) return prev
       return hotelsRes.hotels?.[0]?.id ? String(hotelsRes.hotels[0].id) : ''
     })
-  }, [])
+  }, [notifyPinChanges])
 
   useEffect(() => {
     if (!authenticated) return
     refresh().catch((err) => setError(err.message))
+  }, [authenticated, refresh])
+
+  useEffect(() => {
+    if (!authenticated) return
+    const timer = window.setInterval(() => {
+      refresh().catch(() => {})
+    }, 20000)
+    return () => window.clearInterval(timer)
   }, [authenticated, refresh])
 
   useEffect(() => {
@@ -202,15 +253,20 @@ export default function ManagerDashboard() {
         hotelId: Number(form.hotelId),
         name: form.name.trim(),
         lockId: String(form.lockId).trim(),
+        pin: String(form.pin || '').trim(),
         notes: form.notes.trim(),
         enabled: form.enabled,
       }
       if (editingId) {
         await api.updateSpace(editingId, payload)
-        setFlash('Parking space updated')
+        setFlash(payload.pin ? 'Parking space updated with manual PIN' : 'Parking space updated')
       } else {
         await api.createSpace(payload)
-        setFlash('Parking space added. PINs are assigned automatically from new bookings.')
+        setFlash(
+          payload.pin
+            ? 'Parking space added with a manual PIN. Bookings will not use this lock until the PIN is cleared.'
+            : 'Parking space added. Bookings can assign a PIN to this lock, or you can set one manually.',
+        )
       }
       setEditingId(null)
       setForm({ ...emptyForm, hotelId: form.hotelId })
@@ -479,6 +535,16 @@ export default function ManagerDashboard() {
               <input value={form.lockId} onChange={(e) => setForm({ ...form, lockId: e.target.value })} required />
             </label>
             <label>
+              Manual PIN (optional)
+              <input
+                value={form.pin}
+                onChange={(e) => setForm({ ...form, pin: e.target.value.replace(/\D/g, '').slice(0, 6) })}
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="Leave empty for booking auto-assign"
+              />
+            </label>
+            <label>
               Notes
               <input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
             </label>
@@ -486,7 +552,9 @@ export default function ManagerDashboard() {
               <input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} />
               Enabled
             </label>
-            <p className="muted">PINs are created from the last 6 digits of each Beds24 booking ID.</p>
+            <p className="muted">
+              Leave PIN empty so Beds24 bookings can use this lock. A 6-digit manual PIN occupies the lock until you clear it.
+            </p>
             <div className="form-actions">
               <button type="submit" className="btn btn-primary" disabled={saving}>
                 {saving ? 'Saving…' : editingId ? 'Update' : 'Add space'}
@@ -533,7 +601,7 @@ export default function ManagerDashboard() {
                         <td className="actions">
                           <button type="button" className="btn btn-small" disabled={busyId} onClick={() => runCommand(space, 'unlock')}>Open</button>
                           <button type="button" className="btn btn-small" disabled={busyId} onClick={() => runCommand(space, 'lock')}>Lock</button>
-                          <button type="button" className="btn btn-small" onClick={() => { setEditingId(space.id); setForm({ hotelId: space.hotelId ? String(space.hotelId) : '', name: space.name, lockId: space.lockId, notes: space.notes || '', enabled: space.enabled }) }}>Edit</button>
+                          <button type="button" className="btn btn-small" onClick={() => { setEditingId(space.id); setForm({ hotelId: space.hotelId ? String(space.hotelId) : '', name: space.name, lockId: space.lockId, pin: space.pin || '', notes: space.notes || '', enabled: space.enabled }) }}>Edit</button>
                           <button type="button" className="btn btn-small danger" onClick={async () => { if (window.confirm(`Delete ${space.name}?`)) { await api.deleteSpace(space.id); await refresh() } }}>Delete</button>
                         </td>
                       </tr>

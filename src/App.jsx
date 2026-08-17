@@ -1,5 +1,6 @@
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './AuthContext'
+import { ToastProvider } from './Toasts.jsx'
 import AccessPage from './pages/AccessPage.jsx'
 import AdminDashboard from './pages/AdminDashboard.jsx'
 import LoginPage from './pages/LoginPage.jsx'
@@ -46,6 +47,7 @@ function Shell({ children }) {
 export default function App() {
   return (
     <AuthProvider>
+      <ToastProvider>
       <Shell>
         <Routes>
           <Route path="/" element={<AccessPage />} />
@@ -57,6 +59,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Shell>
+      </ToastProvider>
     </AuthProvider>
   )
 }
