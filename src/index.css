@@ -520,6 +520,7 @@ th {
 
 .chip.on { background: var(--ok-soft); color: var(--ok); }
 .chip.off { background: #eef1f0; color: var(--muted); }
+.chip.blocked { background: var(--danger-soft); color: var(--danger); }
 
 .muted { color: var(--muted); }
 .empty { color: var(--muted); margin: 0; }

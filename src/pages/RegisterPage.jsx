@@ -53,7 +53,7 @@ export default function RegisterPage() {
         <p className="eyebrow">{appName}</p>
         <h1>Register as parking manager</h1>
         <p className="lede">
-          After approval you can connect your TTLock account and manage gateways for your region.
+          After approval you can connect your HHS Lock account and manage gateways for your region.
         </p>
 
         <label>

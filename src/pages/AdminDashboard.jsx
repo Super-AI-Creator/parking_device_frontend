@@ -6,8 +6,9 @@ import { useAuth } from '../AuthContext'
 const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'users', label: 'Managers' },
+  { id: 'hotels', label: 'Hotels' },
   { id: 'spaces', label: 'All spaces' },
-  { id: 'settings', label: 'My TTLock' },
+  { id: 'settings', label: 'My HHS Lock' },
   { id: 'gateways', label: 'Gateways' },
   { id: 'activity', label: 'Activity' },
 ]
@@ -16,6 +17,7 @@ export default function AdminDashboard() {
   const { authenticated, loading: authLoading, logout, appName, isAdmin, refresh: refreshAuth } = useAuth()
   const [tab, setTab] = useState('overview')
   const [users, setUsers] = useState([])
+  const [hotels, setHotels] = useState([])
   const [spaces, setSpaces] = useState([])
   const [logs, setLogs] = useState([])
   const [gateways, setGateways] = useState([])
@@ -28,14 +30,16 @@ export default function AdminDashboard() {
   const [busy, setBusy] = useState(false)
 
   const refresh = useCallback(async () => {
-    const [usersRes, spacesRes, logsRes, dashRes, ttlockRes] = await Promise.all([
+    const [usersRes, hotelsRes, spacesRes, logsRes, dashRes, ttlockRes] = await Promise.all([
       api.listUsers(),
+      api.listHotels(),
       api.listSpaces(),
       api.listLogs(100),
       api.dashboard(),
       api.getTtlock(),
     ])
     setUsers(usersRes.users || [])
+    setHotels(hotelsRes.hotels || [])
     setSpaces(spacesRes.spaces || [])
     setLogs(logsRes.logs || [])
     setDashboard(dashRes)
@@ -63,6 +67,7 @@ export default function AdminDashboard() {
 
   const managers = users.filter((u) => u.role === 'manager')
   const pending = managers.filter((u) => u.status === 'pending')
+  const blockedHotels = hotels.filter((hotel) => hotel.blocked)
   const stats = dashboard?.stats
 
   async function setStatus(user, action) {
@@ -86,13 +91,31 @@ export default function AdminDashboard() {
     }
   }
 
+  async function setHotelBlocked(hotel, blocked) {
+    if (blocked && !window.confirm(`Block "${hotel.name}"? Customer keypad access and new PIN assignment will stop.`)) {
+      return
+    }
+    setBusy(true)
+    setError('')
+    setFlash(null)
+    try {
+      const result = await api.setHotelBlocked(hotel.id, blocked)
+      setFlash(result.message || (blocked ? `Blocked ${hotel.name}` : `Unblocked ${hotel.name}`))
+      await refresh()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function saveTtlock(event) {
     event.preventDefault()
     setBusy(true)
     setError('')
     try {
       await api.saveTtlock(ttlockForm)
-      setFlash('Admin TTLock account saved')
+      setFlash('Admin HHS Lock account saved')
       setTtlockForm((prev) => ({ ...prev, password: '' }))
       await refreshAuth()
       await refresh()
@@ -110,7 +133,7 @@ export default function AdminDashboard() {
           <p className="eyebrow">Administrator</p>
           <h1>{appName} control center</h1>
           <p className="lede">
-            Approve parking managers, oversee spaces, and manage platform-wide activity.
+            Approve parking managers, block hotels, oversee spaces, and manage platform-wide activity.
           </p>
         </div>
         <div className="admin-header-actions">
@@ -154,8 +177,8 @@ export default function AdminDashboard() {
           </article>
           <article className="stat-card">
             <span>Hotels / bookings</span>
-            <strong>{stats?.hotels ?? '—'} / {stats?.activeBookings ?? '—'}</strong>
-            <em>properties / active PINs</em>
+            <strong>{stats?.hotels ?? hotels.length} / {stats?.activeBookings ?? '—'}</strong>
+            <em>{blockedHotels.length} blocked · active PINs</em>
           </article>
         </div>
       )}
@@ -215,6 +238,77 @@ export default function AdminDashboard() {
         </div>
       )}
 
+      {tab === 'hotels' && (
+        <div className="panel table-panel">
+          <div className="panel-head">
+            <h2>Hotels</h2>
+            <button type="button" className="btn btn-ghost" onClick={() => refresh()}>Refresh</button>
+          </div>
+          <p className="lede tight">
+            Block a hotel to stop customer keypad Open/Lock and new PIN assignment. Existing bookings stay until checkout or cancel.
+          </p>
+          {hotels.length === 0 ? (
+            <p className="empty">No hotels yet. Managers sync hotels from HHS PMS.</p>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Hotel</th>
+                    <th>Hotel ID</th>
+                    <th>Manager</th>
+                    <th>Spaces</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {hotels.map((hotel) => (
+                    <tr key={hotel.id}>
+                      <td><strong>{hotel.name}</strong></td>
+                      <td><code>{hotel.hotelId}</code></td>
+                      <td>
+                        {hotel.ownerCompany || hotel.ownerUsername || '—'}
+                        {hotel.ownerUsername && hotel.ownerCompany ? (
+                          <div className="muted">@{hotel.ownerUsername}</div>
+                        ) : null}
+                      </td>
+                      <td>{hotel.availableSpaces} free / {hotel.spaceCount}</td>
+                      <td>
+                        <span className={`chip ${hotel.blocked ? 'blocked' : 'on'}`}>
+                          {hotel.blocked ? 'Blocked' : 'Active'}
+                        </span>
+                      </td>
+                      <td className="actions">
+                        {hotel.blocked ? (
+                          <button
+                            type="button"
+                            className="btn btn-small"
+                            disabled={busy}
+                            onClick={() => setHotelBlocked(hotel, false)}
+                          >
+                            Unblock
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn-small danger"
+                            disabled={busy}
+                            onClick={() => setHotelBlocked(hotel, true)}
+                          >
+                            Block
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {tab === 'spaces' && (
         <div className="panel table-panel">
           <div className="panel-head"><h2>All parking spaces</h2></div>
@@ -232,7 +326,13 @@ export default function AdminDashboard() {
                       <td className="muted">#{space.ownerId}</td>
                       <td><code>{space.lockId}</code></td>
                       <td><code>{space.pin || 'Available'}</code></td>
-                      <td><span className={`chip ${space.enabled ? 'on' : 'off'}`}>{space.enabled ? 'Enabled' : 'Disabled'}</span></td>
+                      <td>
+                        {space.hotelBlocked ? (
+                          <span className="chip blocked">Hotel blocked</span>
+                        ) : (
+                          <span className={`chip ${space.enabled ? 'on' : 'off'}`}>{space.enabled ? 'Enabled' : 'Disabled'}</span>
+                        )}
+                      </td>
                       <td className="actions">
                         <button type="button" className="btn btn-small" onClick={() => api.spaceCommand(space.id, 'unlock').then(() => setFlash(`Opened ${space.name}`)).catch((e) => setError(e.message))}>Open</button>
                         <button type="button" className="btn btn-small" onClick={() => api.spaceCommand(space.id, 'lock').then(() => setFlash(`Locked ${space.name}`)).catch((e) => setError(e.message))}>Lock</button>
@@ -248,16 +348,16 @@ export default function AdminDashboard() {
 
       {tab === 'settings' && (
         <form className="panel form-panel settings-panel" onSubmit={saveTtlock}>
-          <h2>Admin TTLock account (optional)</h2>
+          <h2>Admin HHS Lock account (optional)</h2>
           <p className="lede tight">
-            Managers each connect their own TTLock user. You can also save credentials here to browse gateways as admin.
+            Managers each connect their own HHS Lock user. You can also save credentials here to browse gateways as admin.
           </p>
           <label>
-            TTLock username
+            HHS Lock username
             <input value={ttlockForm.username} onChange={(e) => setTtlockForm({ ...ttlockForm, username: e.target.value })} required />
           </label>
           <label>
-            TTLock password
+            HHS Lock password
             <input type="password" value={ttlockForm.password} onChange={(e) => setTtlockForm({ ...ttlockForm, password: e.target.value })} required />
           </label>
           <button type="submit" className="btn btn-primary" disabled={busy}>
@@ -269,12 +369,12 @@ export default function AdminDashboard() {
       {tab === 'gateways' && (
         <div className="panel gateway-panel">
           <div className="panel-head">
-            <h2>Gateways (admin TTLock account)</h2>
+            <h2>Gateways (admin HHS Lock account)</h2>
             <button type="button" className="btn btn-ghost" onClick={() => refresh()}>Refresh</button>
           </div>
           {gatewayError ? <div className="banner error">{gatewayError}</div> : null}
           {!gatewayError && gateways.length === 0 ? (
-            <p className="empty">Connect TTLock credentials in My TTLock to browse gateways.</p>
+            <p className="empty">Connect HHS Lock credentials in My HHS Lock to browse gateways.</p>
           ) : (
             <div className="gateway-list">
               {gateways.map((g) => (

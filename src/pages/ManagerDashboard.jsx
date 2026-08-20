@@ -9,7 +9,7 @@ const emptyForm = { hotelId: '', name: '', lockId: '', pin: '', notes: '', enabl
 function normalizeLockId(value) {
   const raw = String(value ?? '').trim()
   if (!raw) return ''
-  // TTLock may send numbers; DB stores strings — compare on digits only.
+  // HHS Lock may send numbers; DB stores strings — compare on digits only.
   const digits = raw.replace(/\D/g, '')
   return digits || raw
 }
@@ -21,7 +21,7 @@ function mergeHotelSpaces(current, hotelId, hotelSpaces) {
 
 const TABS = [
   { id: 'overview', label: 'Overview' },
-  { id: 'pms', label: 'Beds24 PMS' },
+  { id: 'pms', label: 'HHS PMS' },
   { id: 'hotels', label: 'Hotels' },
   { id: 'spaces', label: 'Spaces' },
   { id: 'gateways', label: 'Gateways' },
@@ -142,7 +142,7 @@ export default function ManagerDashboard() {
     setHotelTtlock({ username: hotel?.ttlockUsername || '', password: '' })
     if (!hotel?.ttlockConfigured) {
       setGateways([])
-      setGatewayError('Save TTLock username and password for this hotel to load gateways.')
+      setGatewayError('Save HHS Lock username and password for this hotel to load gateways.')
       return
     }
     let cancelled = false
@@ -162,7 +162,7 @@ export default function ManagerDashboard() {
           pushToast({
             type: 'success',
             title: 'Parking locks imported',
-            body: `${res.lockSync.added} TTLock device(s) are now available for bookings.`,
+            body: `${res.lockSync.added} HHS Lock device(s) are now available for bookings.`,
           })
         }
       })
@@ -174,7 +174,7 @@ export default function ManagerDashboard() {
     return () => {
       cancelled = true
     }
-  // Only re-import when the selected hotel or its TTLock connection changes.
+  // Only re-import when the selected hotel or its HHS Lock connection changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedHotelId, selectedHotel?.ttlockConfigured, selectedHotel?.ttlockUsername, pushToast])
 
@@ -189,7 +189,7 @@ export default function ManagerDashboard() {
     setFlash(null)
     try {
       await api.savePms(pmsForm)
-      setFlash('Beds24 connected. Hotels imported. Bookings will sync every minute without staying signed in.')
+      setFlash('HHS PMS connected. Hotels imported. Bookings will sync every minute without staying signed in.')
       setPmsForm({ token: '', refreshToken: '', inviteCode: '' })
       await refreshAuth()
       await refresh()
@@ -202,11 +202,11 @@ export default function ManagerDashboard() {
   }
 
   async function clearPms() {
-    if (!window.confirm('Remove Beds24 credentials from this account?')) return
+    if (!window.confirm('Remove HHS PMS credentials from this account?')) return
     setPmsBusy(true)
     try {
       await api.savePms({ clear: true })
-      setFlash('Beds24 credentials cleared')
+      setFlash('HHS PMS credentials cleared')
       await refresh()
     } catch (err) {
       setError(err.message)
@@ -220,7 +220,7 @@ export default function ManagerDashboard() {
     setError('')
     try {
       const res = await api.syncHotels()
-      setFlash(`Imported ${res.count} hotel(s) from Beds24`)
+      setFlash(`Imported ${res.count} hotel(s) from HHS PMS`)
       await refresh()
       setTab('hotels')
     } catch (err) {
@@ -253,7 +253,7 @@ export default function ManagerDashboard() {
     setFlash(null)
     try {
       const res = await api.saveHotelTtlock(selectedHotelId, hotelTtlock)
-      setFlash(res.message || `TTLock connected for ${selectedHotel?.name || 'hotel'}. Parking locks are imported automatically.`)
+      setFlash(res.message || `HHS Lock connected for ${selectedHotel?.name || 'hotel'}. Parking locks are imported automatically.`)
       setHotelTtlock((prev) => ({ ...prev, password: '' }))
       await refresh()
       setTab('spaces')
@@ -266,11 +266,11 @@ export default function ManagerDashboard() {
 
   async function clearHotelTtlock() {
     if (!selectedHotelId) return
-    if (!window.confirm('Remove TTLock credentials from this hotel?')) return
+    if (!window.confirm('Remove HHS Lock credentials from this hotel?')) return
     setHotelTtlockBusy(true)
     try {
       await api.saveHotelTtlock(selectedHotelId, { clear: true })
-      setFlash('Hotel TTLock credentials cleared')
+      setFlash('Hotel HHS Lock credentials cleared')
       await refresh()
     } catch (err) {
       setError(err.message)
@@ -330,23 +330,36 @@ export default function ManagerDashboard() {
   }
 
   async function removeSpace(space) {
-    if (!window.confirm(`Free ${space.name}? The PIN will be removed from the TTLock and this lock becomes Available.`)) {
+    if (!window.confirm(`Free ${space.name}? The PIN will be removed from the HHS Lock and this lock becomes Available.`)) {
       return
     }
     setBusyId(`delete-${space.id}`)
     setError('')
     setFlash(null)
+    setSpaces((prev) =>
+      prev.map((item) =>
+        item.id === space.id
+          ? { ...item, pin: '', bookingId: null, keyboardPwdId: null }
+          : item,
+      ),
+    )
     try {
       const res = await api.deleteSpace(space.id)
+      if (res.spaces) {
+        setSpaces((prev) => mergeHotelSpaces(prev, space.hotelId, res.spaces))
+      } else if (res.space) {
+        setSpaces((prev) => prev.map((item) => (item.id === res.space.id ? res.space : item)))
+      }
       setFlash(res.message || `${space.name} is Available again.`)
       pushToast({
         type: 'info',
         title: 'Parking lock freed',
         body: res.message || `${space.name} is Available again.`,
       })
-      await refresh()
+      refresh().catch(() => {})
     } catch (err) {
       setError(err.message)
+      await refresh().catch(() => {})
     } finally {
       setBusyId(null)
     }
@@ -397,12 +410,16 @@ export default function ManagerDashboard() {
     try {
       await api.spaceCommand(space.id, action)
       setFlash(`${action === 'unlock' ? 'Opened' : 'Locked'} ${space.name}`)
-      await refresh()
+      refresh().catch(() => {})
     } catch (err) {
       setError(`${space.name}: ${err.message}`)
     } finally {
       setBusyId(null)
     }
+  }
+
+  function spaceBusy(space) {
+    return busyId === `delete-${space.id}` || busyId?.startsWith(`${space.id}-`)
   }
 
   const stats = dashboard?.stats
@@ -430,7 +447,7 @@ export default function ManagerDashboard() {
           <p className="eyebrow">Parking manager</p>
           <h1>{user?.companyName || user?.displayName || user?.username}</h1>
           <p className="lede">
-            Connect Beds24, import hotels, attach a TTLock account per hotel, and let bookings assign parking PINs.
+            Connect HHS PMS, import hotels, attach an HHS Lock account per hotel, and let bookings assign parking PINs.
           </p>
         </div>
         <div className="admin-header-actions">
@@ -459,7 +476,7 @@ export default function ManagerDashboard() {
           <article className="stat-card">
             <span>Hotels</span>
             <strong>{stats?.hotels ?? '—'}</strong>
-            <em>{dashboard?.gateways?.hotelsWithTtlock ?? 0} with TTLock</em>
+            <em>{dashboard?.gateways?.hotelsWithTtlock ?? 0} with HHS Lock</em>
           </article>
           <article className="stat-card">
             <span>Spaces</span>
@@ -469,10 +486,10 @@ export default function ManagerDashboard() {
           <article className="stat-card">
             <span>Active bookings</span>
             <strong>{stats?.activeBookings ?? '—'}</strong>
-            <em>PIN assigned from Beds24</em>
+            <em>PIN assigned from HHS PMS</em>
           </article>
           <article className="stat-card">
-            <span>Beds24</span>
+            <span>HHS PMS</span>
             <strong>{pmsInfo.pmsConfigured ? 'Connected' : 'Not set'}</strong>
             <em>{pmsInfo.pmsRefreshConfigured ? 'Token auto-renews' : (pmsInfo.pmsTokenPreview || 'Add invite code')}</em>
           </article>
@@ -481,11 +498,11 @@ export default function ManagerDashboard() {
 
       {tab === 'pms' && (
         <form className="panel form-panel settings-panel" onSubmit={savePms}>
-          <h2>Beds24 PMS</h2>
+          <h2>HHS PMS</h2>
           <p className="lede tight">
             Connect once. ParkAccess keeps the token fresh and checks bookings every minute, even if nobody is signed in.
-            Use a Beds24 invite code (recommended) or paste both the access token and refresh token from
-            {' '}<a href="https://beds24.com/api/v2" target="_blank" rel="noreferrer">Beds24 API v2</a>.
+            Use an HHS PMS invite code (recommended) or paste both the access token and refresh token from
+            {' '}<a href="https://beds24.com/api/v2" target="_blank" rel="noreferrer">HHS PMS API</a>.
           </p>
           {pmsInfo.pmsConfigured && (
             <p className="muted">
@@ -498,7 +515,7 @@ export default function ManagerDashboard() {
             <input
               value={pmsForm.inviteCode}
               onChange={(e) => setPmsForm({ ...pmsForm, inviteCode: e.target.value })}
-              placeholder="Beds24 setup invite code"
+              placeholder="HHS PMS setup invite code"
             />
           </label>
           <label>
@@ -539,8 +556,8 @@ export default function ManagerDashboard() {
       {tab === 'hotels' && (
         <div className="admin-grid">
           <form className="panel form-panel" onSubmit={saveHotelTtlock}>
-            <h2>Hotel TTLock account</h2>
-            <p className="lede tight">Each hotel uses its own TTLock username and password. Gateways are listed from that account.</p>
+            <h2>Hotel HHS Lock account</h2>
+            <p className="lede tight">Each hotel uses its own HHS Lock username and password. Gateways are listed from that account.</p>
             <label>
               Hotel
               <select
@@ -563,6 +580,9 @@ export default function ManagerDashboard() {
                 {selectedHotel.availableSpaces}/{selectedHotel.spaceCount} spaces free
               </p>
             )}
+            {selectedHotel?.blocked && (
+              <div className="banner error">This hotel is blocked by admin. Customer keypad and new PIN assignment are stopped.</div>
+            )}
             {selectedHotel && (
               <fieldset className="radio-group" disabled={pinModeBusy || !selectedHotelId}>
                 <legend>PIN assignment</legend>
@@ -575,7 +595,7 @@ export default function ManagerDashboard() {
                   />
                   Random mode
                 </label>
-                <p className="radio-help">PIN is written to any one free TTLock at this hotel.</p>
+                <p className="radio-help">PIN is written to any one free HHS Lock at this hotel.</p>
                 <label className="checkbox">
                   <input
                     type="radio"
@@ -586,22 +606,22 @@ export default function ManagerDashboard() {
                   Auto mode
                 </label>
                 <p className="radio-help">
-                  PIN is written to the TTLock whose name matches the booking parking info (for example Park 1).
+                  PIN is written to the HHS Lock whose name matches the booking parking info (for example Park 1).
                   If the booking has no parking info, Random is used. If the matched lock is occupied or missing, the booking stays unassigned.
                 </p>
               </fieldset>
             )}
             <label>
-              TTLock username
+              HHS Lock username
               <input
                 value={hotelTtlock.username}
                 onChange={(e) => setHotelTtlock({ ...hotelTtlock, username: e.target.value })}
-                placeholder="TTLock account email or phone"
+                placeholder="HHS Lock account email or phone"
                 required
               />
             </label>
             <label>
-              TTLock password
+              HHS Lock password
               <input
                 type="password"
                 value={hotelTtlock.password}
@@ -624,13 +644,13 @@ export default function ManagerDashboard() {
 
           <div className="panel table-panel">
             <div className="panel-head">
-              <h2>Hotels from Beds24</h2>
+              <h2>Hotels from HHS PMS</h2>
               <button type="button" className="btn btn-ghost" onClick={runHotelSync} disabled={pmsBusy}>
                 Refresh from PMS
               </button>
             </div>
             {hotels.length === 0 ? (
-              <p className="empty">No hotels yet. Connect Beds24 and sync hotels.</p>
+              <p className="empty">No hotels yet. Connect HHS PMS and sync hotels.</p>
             ) : (
               <div className="table-wrap">
                 <table>
@@ -638,9 +658,10 @@ export default function ManagerDashboard() {
                     <tr>
                       <th>Hotel</th>
                       <th>Hotel ID</th>
-                      <th>TTLock</th>
+                      <th>HHS Lock</th>
                       <th>PIN mode</th>
                       <th>Spaces</th>
+                      <th>Status</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -655,6 +676,11 @@ export default function ManagerDashboard() {
                         </td>
                         <td>{hotel.pinAssignMode === 'auto' ? 'Auto' : 'Random'}</td>
                         <td>{hotel.availableSpaces} free / {hotel.spaceCount}</td>
+                        <td>
+                          <span className={`chip ${hotel.blocked ? 'blocked' : 'on'}`}>
+                            {hotel.blocked ? 'Blocked' : 'Active'}
+                          </span>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -720,7 +746,7 @@ export default function ManagerDashboard() {
               </select>
             </label>
             <label>
-              TTLock lockId
+              HHS Lock lockId
               <input value={form.lockId} readOnly placeholder="Filled when you select a space" />
             </label>
             <label>
@@ -766,7 +792,7 @@ export default function ManagerDashboard() {
             </div>
             {spaces.length === 0 ? (
               <p className="empty">
-                No parking locks yet. Connect the hotel TTLock account under <strong>Hotels</strong> — every lock on that account is imported automatically. Available = no PIN, Occupied = has a PIN.
+                No parking locks yet. Connect the hotel HHS Lock account under <strong>Hotels</strong> — every lock on that account is imported automatically. Available = no PIN, Occupied = has a PIN.
               </p>
             ) : (
               <div className="table-wrap">
@@ -790,10 +816,12 @@ export default function ManagerDashboard() {
                         <td><code>{space.pin ? (showPins ? space.pin : '••••••') : 'Available'}</code></td>
                         <td><span className={`chip ${space.pin ? 'off' : (space.enabled ? 'on' : 'off')}`}>{!space.enabled ? 'Disabled' : (space.pin ? (space.bookingId ? `Occupied · Booking ${space.bookingId}` : 'Occupied') : 'Available')}</span></td>
                         <td className="actions">
-                          <button type="button" className="btn btn-small" disabled={busyId} onClick={() => runCommand(space, 'unlock')}>Open</button>
-                          <button type="button" className="btn btn-small" disabled={busyId} onClick={() => runCommand(space, 'lock')}>Lock</button>
+                          <button type="button" className="btn btn-small" disabled={spaceBusy(space)} onClick={() => runCommand(space, 'unlock')}>Open</button>
+                          <button type="button" className="btn btn-small" disabled={spaceBusy(space)} onClick={() => runCommand(space, 'lock')}>Lock</button>
                           <button type="button" className="btn btn-small" onClick={() => { setEditingId(space.id); setForm({ hotelId: space.hotelId ? String(space.hotelId) : '', name: space.name, lockId: space.lockId, pin: space.pin || '', notes: space.notes || '', enabled: space.enabled }); setTab('spaces') }}>Set PIN</button>
-                          <button type="button" className="btn btn-small danger" disabled={busyId} onClick={() => removeSpace(space)}>Free</button>
+                          <button type="button" className="btn btn-small danger" disabled={spaceBusy(space)} onClick={() => removeSpace(space)}>
+                            {busyId === `delete-${space.id}` ? 'Freeing…' : 'Free'}
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -809,9 +837,9 @@ export default function ManagerDashboard() {
         <div className="panel gateway-panel">
           <div className="panel-head">
             <div>
-              <h2>Hotel TTLock gateways</h2>
+              <h2>Hotel HHS Lock gateways</h2>
               <p className="lede tight">
-                Locks on this hotel’s TTLock account are parking spaces automatically.
+                Locks on this hotel’s HHS Lock account are parking spaces automatically.
                 Status is only <strong>Available</strong> or <strong>Occupied</strong>.
               </p>
             </div>
@@ -885,7 +913,7 @@ export default function ManagerDashboard() {
             <div>
               <h2>Bookings</h2>
               <p className="lede tight">
-                Synced from Beds24 every minute. PIN = last 6 digits of booking ID.
+                Synced from HHS PMS every minute. PIN = last 6 digits of booking ID.
                 Auto mode uses the matching parking lock when the booking has parking info.
               </p>
             </div>

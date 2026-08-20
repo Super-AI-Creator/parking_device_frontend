@@ -103,7 +103,7 @@ export default function AccessPage() {
         <div className={`pin-display ${step === 'hotel' ? 'plain' : ''}`} aria-live="polite">
           {step === 'hotel'
             ? (hotelId || 'Hotel ID')
-            : (pin ? '•'.repeat(pin.length) : '------')}
+            : (pin ? pin.padEnd(PIN_LEN, '-') : '------')}
         </div>
         <p className="muted access-hint">
           {step === 'hotel'
