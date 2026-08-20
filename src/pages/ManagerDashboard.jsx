@@ -54,6 +54,7 @@ export default function ManagerDashboard() {
   const [selectedHotelId, setSelectedHotelId] = useState('')
   const [hotelTtlock, setHotelTtlock] = useState({ username: '', password: '' })
   const [hotelTtlockBusy, setHotelTtlockBusy] = useState(false)
+  const [pinModeBusy, setPinModeBusy] = useState(false)
 
   const selectedHotel = hotels.find((hotel) => String(hotel.id) === String(selectedHotelId)) || null
 
@@ -275,6 +276,22 @@ export default function ManagerDashboard() {
       setError(err.message)
     } finally {
       setHotelTtlockBusy(false)
+    }
+  }
+
+  async function saveHotelPinMode(mode) {
+    if (!selectedHotelId) return
+    setPinModeBusy(true)
+    setError('')
+    setFlash(null)
+    try {
+      const res = await api.saveHotelPinMode(selectedHotelId, mode)
+      setFlash(res.message || `PIN assignment set to ${mode} mode.`)
+      await refresh()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setPinModeBusy(false)
     }
   }
 
@@ -546,6 +563,34 @@ export default function ManagerDashboard() {
                 {selectedHotel.availableSpaces}/{selectedHotel.spaceCount} spaces free
               </p>
             )}
+            {selectedHotel && (
+              <fieldset className="radio-group" disabled={pinModeBusy || !selectedHotelId}>
+                <legend>PIN assignment</legend>
+                <label className="checkbox">
+                  <input
+                    type="radio"
+                    name="pinAssignMode"
+                    checked={(selectedHotel.pinAssignMode || 'random') === 'random'}
+                    onChange={() => saveHotelPinMode('random')}
+                  />
+                  Random mode
+                </label>
+                <p className="radio-help">PIN is written to any one free TTLock at this hotel.</p>
+                <label className="checkbox">
+                  <input
+                    type="radio"
+                    name="pinAssignMode"
+                    checked={selectedHotel.pinAssignMode === 'auto'}
+                    onChange={() => saveHotelPinMode('auto')}
+                  />
+                  Auto mode
+                </label>
+                <p className="radio-help">
+                  PIN is written to the TTLock whose name matches the booking parking info (for example Park 1).
+                  If the booking has no parking info, Random is used. If the matched lock is occupied or missing, the booking stays unassigned.
+                </p>
+              </fieldset>
+            )}
             <label>
               TTLock username
               <input
@@ -594,6 +639,7 @@ export default function ManagerDashboard() {
                       <th>Hotel</th>
                       <th>Hotel ID</th>
                       <th>TTLock</th>
+                      <th>PIN mode</th>
                       <th>Spaces</th>
                     </tr>
                   </thead>
@@ -607,6 +653,7 @@ export default function ManagerDashboard() {
                             {hotel.ttlockConfigured ? hotel.ttlockUsername : 'Not set'}
                           </span>
                         </td>
+                        <td>{hotel.pinAssignMode === 'auto' ? 'Auto' : 'Random'}</td>
                         <td>{hotel.availableSpaces} free / {hotel.spaceCount}</td>
                       </tr>
                     ))}
@@ -837,7 +884,10 @@ export default function ManagerDashboard() {
           <div className="panel-head">
             <div>
               <h2>Bookings</h2>
-              <p className="lede tight">Synced from Beds24 every minute. PIN = last 6 digits of booking ID.</p>
+              <p className="lede tight">
+                Synced from Beds24 every minute. PIN = last 6 digits of booking ID.
+                Auto mode uses the matching parking lock when the booking has parking info.
+              </p>
             </div>
             <button type="button" className="btn btn-ghost" onClick={runBookingSync} disabled={pmsBusy}>
               Sync now

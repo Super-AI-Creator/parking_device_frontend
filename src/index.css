@@ -290,7 +290,7 @@ h2 { font-size: 1.15rem; }
 }
 
 .login-panel input,
-.form-panel input:not([type='checkbox']),
+.form-panel input:not([type='checkbox']):not([type='radio']),
 .form-panel select,
 .panel-head select {
   width: 100%;
@@ -435,6 +435,19 @@ h2 { font-size: 1.15rem; }
 
 .form-panel { display: grid; gap: 0.85rem; align-content: start; }
 
+.form-panel fieldset {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.75rem 0.9rem 0.9rem;
+  margin: 0;
+}
+
+.form-panel legend {
+  padding: 0 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
 .checkbox {
   display: flex !important;
   align-items: center;
@@ -443,6 +456,22 @@ h2 { font-size: 1.15rem; }
 }
 
 .checkbox.compact { font-size: 0.85rem; margin: 0; }
+
+.radio-group {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.radio-group .checkbox {
+  font-weight: 500;
+}
+
+.radio-help {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 400;
+  color: var(--muted);
+}
 
 .form-actions, .row-actions {
   display: flex;

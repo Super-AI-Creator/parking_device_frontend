@@ -54,6 +54,8 @@ export const api = {
   listHotels: () => request('/api/hotels'),
   saveHotelTtlock: (hotelId, body) =>
     request(`/api/hotels/${hotelId}/ttlock`, { method: 'PUT', body: JSON.stringify(body) }),
+  saveHotelPinMode: (hotelId, pinAssignMode) =>
+    request(`/api/hotels/${hotelId}`, { method: 'PUT', body: JSON.stringify({ pinAssignMode }) }),
   listHotelGateways: (hotelId, includeLocks = true) =>
     request(`/api/hotels/${hotelId}/gateways?includeLocks=${includeLocks ? '1' : '0'}`),
   listBookings: (hotelId) =>
