@@ -606,8 +606,9 @@ export default function ManagerDashboard() {
                   Auto mode
                 </label>
                 <p className="radio-help">
-                  PIN is written to the HHS Lock whose name matches parking text in the booking JSON (for example Park 1).
-                  If the booking has no parking text, no PIN is created. If the matched lock is occupied or missing, the booking stays unassigned.
+                  PIN is written to the HHS Lock that matches the booking’s parking room in HHS PMS.
+                  Room names like Park or Parking plus unit 1 go on Park 1 (unit 2 → Park 2).
+                  A normal guest room does not get a PIN. If the matched lock is occupied or missing, the booking stays unassigned.
                 </p>
               </fieldset>
             )}
