@@ -189,7 +189,7 @@ export default function ManagerDashboard() {
     setFlash(null)
     try {
       await api.savePms(pmsForm)
-      setFlash('HHS PMS connected. Hotels imported. Bookings will sync every minute without staying signed in.')
+      setFlash('HHS PMS connected. Hotels imported. Bookings will sync every 3 minutes without staying signed in.')
       setPmsForm({ token: '', refreshToken: '', inviteCode: '' })
       await refreshAuth()
       await refresh()
@@ -500,7 +500,7 @@ export default function ManagerDashboard() {
         <form className="panel form-panel settings-panel" onSubmit={savePms}>
           <h2>HHS PMS</h2>
           <p className="lede tight">
-            Connect once. ParkAccess keeps the token fresh and checks bookings every minute, even if nobody is signed in.
+            Connect once. ParkAccess keeps the token fresh and checks bookings every 3 minutes, even if nobody is signed in.
             Use an HHS PMS invite code (recommended) or paste both the access token and refresh token from
             {' '}<a href="https://beds24.com/api/v2" target="_blank" rel="noreferrer">HHS PMS API</a>.
           </p>
@@ -606,8 +606,8 @@ export default function ManagerDashboard() {
                   Auto mode
                 </label>
                 <p className="radio-help">
-                  PIN is written to the HHS Lock whose name matches the booking parking info (for example Park 1).
-                  If the booking has no parking info, Random is used. If the matched lock is occupied or missing, the booking stays unassigned.
+                  PIN is written to the HHS Lock whose name matches parking text in the booking JSON (for example Park 1).
+                  If the booking has no parking text, no PIN is created. If the matched lock is occupied or missing, the booking stays unassigned.
                 </p>
               </fieldset>
             )}
@@ -913,7 +913,7 @@ export default function ManagerDashboard() {
             <div>
               <h2>Bookings</h2>
               <p className="lede tight">
-                Synced from HHS PMS every minute. PIN = last 6 digits of booking ID.
+                Synced from HHS PMS every 3 minutes. PIN = last 6 digits of booking ID.
                 Auto mode uses the matching parking lock when the booking has parking info.
               </p>
             </div>
