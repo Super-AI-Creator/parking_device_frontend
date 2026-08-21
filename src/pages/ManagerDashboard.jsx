@@ -916,6 +916,7 @@ export default function ManagerDashboard() {
               <p className="lede tight">
                 Synced from HHS PMS every 3 minutes. PIN = last 6 digits of booking ID.
                 Auto mode uses the matching parking lock when the booking has parking info.
+                If a booking is cancelled, deleted in HHS PMS, or the departure date has passed, the PIN is removed and the lock is freed.
               </p>
             </div>
             <button type="button" className="btn btn-ghost" onClick={runBookingSync} disabled={pmsBusy}>
